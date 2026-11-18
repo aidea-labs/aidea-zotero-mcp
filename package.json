@@ -1,0 +1,44 @@
+{
+  "name": "@aidea-labs/aidea-zotero-mcp",
+  "version": "0.1.0",
+  "description": "A Zotero MCP server with an interactive UI for searching papers, reading PDFs, exporting BibTeX, and human–AI research collaboration.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "node": ">=24.13.0"
+  },
+  "bin": {
+    "aidea-zotero-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && node --check ui/prototype.js && npm test && npm run build",
+    "preview": "npm run build && node dist/preview/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "pdfjs-dist": "6.5.438",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js"
+    }
+  }
+}
