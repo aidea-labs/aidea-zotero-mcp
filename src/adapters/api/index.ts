@@ -42,7 +42,8 @@ export class ApiAdapter implements Adapter {
     try {
       response = await fetch(this.origin + path, {
         redirect: 'manual', signal: AbortSignal.any([signal, AbortSignal.timeout(this.timeoutMs)]),
-        headers: { 'Zotero-API-Version': '3',
+        // 本机服务可随时退出。避免下一次探测复用旧连接，误把已关闭判为网络异常。
+        headers: { 'Zotero-API-Version': '3', Connection: 'close',
           ...(this.source.identity && this.source.identity !== this.origin ? { 'Zotero-Server-ID': this.source.identity } : {}) },
       });
     } catch (error) {
