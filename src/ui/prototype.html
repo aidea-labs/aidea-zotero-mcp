@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIdea Zotero MCP</title>
+<link rel="stylesheet" href="/vendor/web/pdf_viewer.css">
+<style>
+:root{font:14px/1.55 Inter,-apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif;color:#222b37;background:#fff;--line:#e3e7ed;--muted:#677283;--blue:#285ca6;--selected:#edf3fc;--bg:#f6f8fa}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0}
+button,input,select,textarea{font:inherit;color:inherit}
+button,select{cursor:pointer}
+button{border:1px solid var(--line);border-radius:6px;padding:6px 11px;background:white}
+button:hover{background:#f1f4f8}
+button:disabled{opacity:.4;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid #467ecb;outline-offset:2px}
+input[type=checkbox]{accent-color:var(--blue);width:15px;height:15px;cursor:pointer}
+.primary{background:#253142;color:white;border-color:#253142}
+.primary:hover{background:#3a495e}
+.quiet{border-color:transparent;background:transparent;color:var(--muted)}
+.tabs{
+  display:flex;align-items:center;gap:6px;height:46px;padding:6px 12px;
+  border-bottom:1px solid var(--line);background:#f4f6f9;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;
+}
+.tab-item{
+  display:flex;align-items:center;flex:0 0 182px;min-width:0;height:32px;
+  border:1px solid transparent;border-radius:8px;color:#5d6877;
+}
+.tab-item:hover{background:#ebeff4;color:#253142}
+.tab-item:has(.tab[aria-selected=true]){
+  color:#26354a;background:white;border-color:#dbe2eb;box-shadow:0 1px 2px #1b2b4410;
+}
+.tab,.tab-close{border:0;background:transparent;color:inherit;box-shadow:none}
+.tab:hover,.tab:focus-visible{background:transparent}
+.tab{flex:1;min-width:0;height:100%;padding:0 9px;font-size:13px;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tab[aria-selected=true]{font-weight:600}
+.tab-close{flex:0 0 24px;height:24px;padding:0;margin-right:3px;border-radius:5px;font-size:17px;line-height:1}
+.tab-close:hover{background:#dfe6ef;color:#253142}
+.library-tab-item{flex-basis:auto;position:sticky;left:0;z-index:1;background:#f4f6f9}
+.library-tab-item .tab{padding:0 13px}
+.app{height:calc(100dvh - 46px);min-width:0}
+.library{height:100%;display:grid;grid-template-columns:164px minmax(300px,1fr) 288px}
+nav.folders{padding:23px 11px;background:#fafbfc;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:5px}
+nav h2{font-size:11px;color:var(--muted);margin:0 10px 9px;font-weight:600;letter-spacing:.02em}
+nav button{border-color:transparent;background:transparent;text-align:left;font-size:13px}
+nav button[aria-pressed=true]{background:var(--selected);color:var(--blue)}
+.table-pane{min-width:0;min-height:0;display:flex;flex-direction:column}
+.searchbar{padding:19px 22px 15px;display:flex;gap:8px}
+.searchbox{flex:1;min-width:0;position:relative}
+.searchbox input{width:100%;padding:9px 12px;border:1px solid var(--line);border-radius:7px;background:var(--bg);font-size:13px}
+select{border:1px solid var(--line);border-radius:6px;padding:6px 9px;background:white;font-size:12px}
+.listbar{display:flex;align-items:center;justify-content:space-between;padding:0 22px 13px;min-height:39px;gap:10px}
+.counter{font-size:12px;color:var(--muted)}
+.listbar button{font-size:12px}
+.table-scroll{overflow:auto;flex:1}
+table{width:100%;border-collapse:collapse;text-align:left}
+th{position:sticky;top:0;font-size:11px;font-weight:500;background:#f9fafc;border-block:1px solid var(--line);color:var(--muted);padding:9px 12px}
+td{font-size:12px;padding:15px 12px;border-bottom:1px solid #edf0f4;vertical-align:top}
+td:first-child,th:first-child{width:42px;padding-left:22px;padding-right:2px}
+tr.selected td{background:var(--selected)}
+tr.selected .paper-title{color:#234f8b}
+tr:hover td{background:#f6f8fc}
+.paper-title{display:block;text-align:left;padding:0;border:0;background:transparent;font-size:14px;line-height:1.5;font-weight:550;color:#222b37;white-space:normal}
+.paper-title:hover{color:var(--blue);background:transparent}
+.sub{font-size:11px;color:var(--muted);margin-top:5px}
+.year,.format{white-space:nowrap}
+.empty{padding:32px 24px;color:var(--muted);font-size:13px}
+.detail{min-width:0;border-left:1px solid var(--line);overflow:auto;background:#fcfdfe;padding:22px 20px}
+.eyebrow{font-size:11px;color:var(--muted);margin:0 0 9px}
+.detail h1{font-size:17px;line-height:1.45;letter-spacing:-.015em;margin:0 0 10px}
+.meta{font-size:12px;color:var(--muted);margin:0 0 18px}
+.action-stack{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 19px}
+.action-stack button{font-size:12px}
+.detail-tabs{display:flex;border-bottom:1px solid var(--line);gap:16px;margin:8px 0 17px}
+.detail-tabs button{border:0;border-radius:0;border-bottom:2px solid transparent;padding:7px 0;background:transparent;font-size:12px;color:var(--muted)}
+.detail-tabs button[aria-pressed=true]{border-bottom-color:var(--blue);color:var(--blue)}
+.detail h2{font-size:12px;font-weight:650;margin:18px 0 7px}
+.detail p{font-size:12px;line-height:1.8}
+.detail .abstract{text-align:justify;text-align-last:start}
+.tags{display:flex;gap:5px;flex-wrap:wrap}
+.tag{font-size:11px;padding:3px 7px;border:1px solid var(--line);border-radius:4px;color:var(--muted);background:#fff}
+dl{font-size:12px;margin:0}
+dt{color:var(--muted);font-size:11px;margin-top:12px}
+dd{margin:3px 0 0;overflow-wrap:anywhere}
+.reader{display:flex;flex-direction:column;height:100%}
+.readerbar{
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:8px;
+  padding:7px 14px;border-bottom:1px solid var(--line);background:#fff;
+}
+.reader-controls{display:flex;align-items:center;gap:4px;min-width:0;white-space:nowrap}
+.reader-tools{justify-content:flex-end}
+.readerbar button,.readerbar select{height:30px;font-size:12px}
+.reader-step{min-width:30px;padding:3px 6px}
+.reader-zoom .reader-step{font-size:16px}
+.reader-zoom select{width:126px;padding-inline:5px;background:#fff}
+.reader-find{display:flex;align-items:center;flex:0 1 268px;min-width:98px;gap:2px;height:30px;
+  padding:0 3px 0 7px;border:1px solid var(--line);border-radius:6px;background:#fff}
+.reader-find:focus-within{border-color:#8da7cc}
+.reader-find input{flex:1;min-width:0;width:100%;height:24px;border:0;font-size:12px;background:transparent;outline:none}
+.reader-find input:focus-visible{outline:none}
+.reader-find .match-count{font-size:11px;min-width:0;max-width:76px;overflow:hidden;text-overflow:ellipsis;color:var(--muted);font-variant-numeric:tabular-nums}
+.reader-find button{min-width:23px;height:24px;padding:1px 3px;border:0;color:var(--muted);background:transparent}
+.reader-find button:hover:not(:disabled){background:#edf2f8;color:#253142}
+.page-status{min-width:34px;text-align:center;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.reader-body{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);background:#eff2f6}
+.sheet-pane{overflow:auto;padding:28px 40px 40px}
+.sheet{max-width:730px;min-height:650px;margin:auto;background:white;border:1px solid #dce1e8;box-shadow:0 3px 14px #26364b0c;padding:42px 48px}
+.journal{font-size:10px;color:#727b86;border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:26px}
+.sheet h1{font:600 28px/1.25 Georgia,serif;letter-spacing:-.015em;margin:0 0 10px}
+.byline{font-size:11px;color:var(--muted);margin-bottom:30px}
+.sheet h2{font:600 18px/1.4 Georgia,serif;margin:20px 0 10px}
+.sheet p{font:16px/1.85 Georgia,serif;margin:0 0 19px}
+.sheet .marked{background:#fff0c7;outline:4px solid #fff0c7;border-radius:2px}
+.page-number{text-align:center;font-size:11px;color:var(--muted);margin-top:55px}
+dialog{border:1px solid #d7dfe9;border-radius:12px;box-shadow:0 20px 80px #12223c26;width:540px;max-width:calc(100vw - 36px);padding:0}
+dialog::backdrop{background:#17263a35}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:18px 22px;border-bottom:1px solid var(--line)}
+.modal-head h2{font-size:16px;margin:0}
+.modal-body{padding:18px 22px}
+.modal-body p{font-size:12px;color:var(--muted);margin:0 0 13px}
+.modal-body pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.7 ui-monospace,SFMono-Regular,monospace;background:var(--bg);padding:14px;border-radius:7px;max-height:50vh;overflow:auto}
+.modal-foot{padding:14px 22px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--line)}
+#status{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#263244;color:white;max-width:90%;border-radius:7px;padding:10px 16px;font-size:12px;box-shadow:0 4px 15px #12233c22}
+.detail-toggle{display:none}
+@media(min-width:1500px){.library{grid-template-columns:180px minmax(0,1fr) 320px}.detail{padding:25px}}
+@media(max-width:1000px){.library{grid-template-columns:132px minmax(0,1fr) 245px}.detail{padding:17px 14px}.sheet-pane{padding:20px}.sheet{padding:30px}}
+@media(max-width:760px){.library{grid-template-columns:110px minmax(0,1fr);position:relative}.detail{display:none}.library.show-detail .detail{display:block;position:absolute;right:0;top:0;bottom:0;width:min(320px,88vw);box-shadow:-10px 0 25px #18263a14}.detail-toggle{display:block}.searchbar{padding:13px}.listbar{padding:0 13px 12px}.format{display:none}.sheet-pane{padding:14px}.sheet{padding:24px}.sheet h1{font-size:23px}.sheet p{font-size:14px}}
+
+#collections{display:flex;flex-direction:column;gap:3px;overflow:auto;min-height:0}
+#collections button{overflow-wrap:anywhere}
+.paging{display:flex;align-items:center;justify-content:flex-end;gap:12px;border-top:1px solid var(--line);padding:12px 20px;font-size:12px;color:var(--muted)}
+.pdf-stack{position:relative;display:flex;flex-direction:column;align-items:center;gap:14px;width:max-content;min-width:100%}
+.pdf-page{position:relative;background:white;box-shadow:0 3px 14px #26364b17;flex:none;overflow:hidden}
+.pdf-frame{position:relative;transform-origin:top left}
+.pdf-page canvas{display:block;width:100%;height:100%}
+.pdf-page .textLayer{--total-scale-factor:var(--scale-factor)}
+.textLayer ::highlight(pdf-find){background:#ffdc606b}
+.textLayer ::highlight(pdf-find-active){background:#ff9f368f}
+@media(max-width:780px){
+  .readerbar{grid-template-columns:minmax(0,1fr) auto;padding:6px 9px;gap:6px}
+  .reader-zoom{justify-self:end}
+  .reader-tools{grid-column:1 / -1}
+  .reader-find{flex:1}
+}
+.sheet-pane{position:relative;display:block;min-width:0;overflow:auto;scrollbar-gutter:stable;overflow-anchor:none}
+.pdf-error{margin:auto;padding:25px;max-width:500px;background:#fff;font-size:13px}
+.note-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.note-card{border-bottom:1px solid var(--line);padding-bottom:12px;margin-bottom:16px}
+.attachment-name{overflow-wrap:anywhere}
+.note-empty{color:var(--muted)}
+.detail .error-message{color:#9d362f}
+
+.search-home{height:100dvh;display:flex;justify-content:center;align-items:flex-start;padding:0 24px}
+.search-focus{width:min(600px,100%);margin-top:clamp(120px,29vh,330px)}
+.search-focus h1{text-align:center;font-size:38px;font-weight:550;letter-spacing:-1.3px;margin:0 0 30px;color:#253142}
+.home-search{display:flex;align-items:center;border:1px solid #dce1e7;border-radius:28px;padding:5px 7px 5px 22px;box-shadow:0 2px 7px #182b4506}
+.home-search:focus-within,.home-search:hover{box-shadow:0 3px 14px #182b4510;border-color:#c8d0db}
+.home-search input{height:43px;min-width:0;flex:1;border:0;background:transparent;outline:none;padding:0;font-size:15px}
+.home-search input:focus-visible{outline:none}
+.home-search button{border:0;border-radius:50%;width:42px;height:42px;display:grid;place-items:center;color:#526174;background:transparent}
+.home-search button:hover{background:#edf2f7}
+.library{
+  position:relative;grid-template-columns:minmax(0,1fr);--results-gutter:clamp(14px,3vw,32px);
+  --detail-width:320px;--detail-max:min(620px,calc(100% - 300px));
+  --visible-detail-width:clamp(min(240px,var(--detail-max)),var(--detail-width),var(--detail-max));
+}
+.library.show-detail{grid-template-columns:minmax(0,1fr) var(--visible-detail-width)}
+.detail-resizer{
+  position:absolute;z-index:2;inset-block:0;right:var(--visible-detail-width);transform:translateX(50%);
+  width:14px;cursor:col-resize;touch-action:none;
+}
+.detail-resizer::after{content:"";position:absolute;inset-block:0;left:6px;width:2px}
+.detail-resizer:hover::after,.detail-resizer:focus-visible::after,.library.resizing .detail-resizer::after{background:var(--blue)}
+.library.resizing{cursor:col-resize;user-select:none}
+.table-pane{width:min(820px,100%);margin:0 auto}
+.library.show-detail .table-pane{width:100%}
+.results-form{display:flex;align-items:center;gap:8px}
+.results-form input{flex:1;min-width:0;background:#fff;padding:8px 12px}
+.results-form button{font-size:13px;flex:none}
+.searchbar{padding:15px var(--results-gutter) 7px}
+.listbar{padding:0 var(--results-gutter) 6px;min-height:30px}
+.listbar .counter{color:#637084}
+#rows{padding:0 var(--results-gutter) 12px}
+.result{position:relative;padding:11px 0 12px;border-bottom:1px solid #eef1f5}
+.result:last-child{border-bottom:0}
+.result.selected{background:#f5f8fd;border-radius:6px;box-shadow:0 0 0 6px #f5f8fd;border-bottom-color:transparent}
+.result-check{position:absolute;right:0;top:12px;display:grid;place-items:center;width:25px;height:24px;opacity:0}
+.result:hover .result-check,.result:focus-within .result-check,.result-check:has(input:checked){opacity:1}
+.result-check input{margin:0}
+.result-content{min-width:0}
+.result .paper-title{font-size:16px;font-weight:550;line-height:1.45;color:#245b9f;margin:0 0 3px;max-width:calc(100% - 27px)}
+.result .paper-title:hover{text-decoration:underline;text-underline-offset:2px}
+.result-meta{font-size:12px;color:#3d6558;line-height:1.55;overflow-wrap:anywhere}
+.result .snippet{font-size:13px;line-height:1.55;color:#384455;margin:3px 0 0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
+.result-actions{display:flex;gap:12px;margin-top:4px}
+.result-action{border:0;padding:0;background:transparent;color:#365e90;font-size:12px;line-height:1.7}
+.result-action:hover{background:transparent;text-decoration:underline;text-underline-offset:2px}
+#batch:disabled{display:none}
+.paging{border-top:1px solid var(--line);padding:8px var(--results-gutter)}
+.detail-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:6px}
+.detail-heading h1{min-width:0;overflow-wrap:anywhere}
+.detail-dismiss{margin:0;color:var(--muted)}
+.library.has-detail:not(.show-detail) .detail-toggle{display:block}
+.library:not(.has-detail) .detail-toggle,.library.show-detail .detail-toggle{display:none}
+@media(max-width:760px){
+  .search-focus h1{font-size:32px}
+  .library{--detail-max:min(520px,calc(100% - 32px))}
+  .library.show-detail{grid-template-columns:minmax(0,1fr)}
+  .library.show-detail .detail{display:block;width:var(--visible-detail-width)}
+  .table-pane{width:100%}
+}
+@media(max-width:520px){.tab-item:not(.library-tab-item){flex-basis:152px}}
+@media(hover:none){.result-check{opacity:1}}
+</style>
+</head>
+<body>
+<div class="tabs" id="work-tabs" hidden role="tablist" aria-label="工作区标签"><div class="tab-item library-tab-item" role="presentation"><button class="tab" id="library-tab" role="tab" aria-selected="true" aria-controls="library-view">文库</button></div></div>
+<section id="search-home" class="search-home" aria-label="搜索首页">
+<div class="search-focus"><h1>AIdea Zotero MCP</h1><form id="home-form" class="home-search" role="search"><input id="home-query" type="search" aria-label="搜索 Zotero 文库" placeholder="从本地 Zotero 中搜索题名、作者、DOI 或关键词" autocomplete="off"><button type="submit" aria-label="搜索"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.4 4.4"/></svg></button></form></div>
+</section>
+<main class="app" id="app-main" hidden>
+<section class="library" id="library-view" role="tabpanel" aria-labelledby="library-tab">
+
+<section class="table-pane" aria-label="文献列表">
+<div class="searchbar"><div class="searchbox"><form id="results-form" role="search" class="results-form"><input id="query" type="search" aria-label="搜索文库" placeholder="从本地 Zotero 中搜索题名、作者、DOI 或关键词"><button type="submit">搜索</button></form></div></div>
+<div class="listbar"><div style="display:flex;gap:16px;align-items:center"><span class="counter" id="counter" role="status"></span><label id="selection-controls" hidden><input id="select-all" type="checkbox" aria-label="选择当前结果"> 选择当前结果</label></div><div style="display:flex;gap:7px"><button id="batch" disabled>导出 BibTeX</button><button class="detail-toggle" id="detail-toggle" aria-expanded="false" aria-controls="detail">显示详情</button></div></div>
+<div class="table-scroll"><div id="rows" role="list" aria-label="搜索结果"></div><div class="empty" id="empty" hidden></div></div><div class="paging" id="pagination" hidden><button id="previous-results" disabled>上一页</button><span id="result-page"></span><button id="next-results" disabled>下一页</button></div>
+</section>
+<aside class="detail" id="detail" aria-label="当前文献详情" hidden></aside>
+<div class="detail-resizer" id="detail-resizer" role="separator" aria-label="调整文献详情宽度" aria-controls="detail" aria-orientation="vertical" tabindex="0" hidden></div>
+</section>
+<section class="reader" id="reader-view" role="tabpanel" hidden>
+<div class="readerbar" role="toolbar" aria-label="PDF 阅读工具">
+  <div class="reader-controls">
+    <button class="reader-step" id="prev" aria-label="上一页" title="上一页">‹</button>
+    <span class="page-status" id="page-status"></span>
+    <button class="reader-step" id="next" aria-label="下一页" title="下一页">›</button>
+  </div>
+  <div class="reader-controls reader-zoom">
+    <button class="reader-step" id="zoom-out" aria-label="缩小" title="缩小">−</button>
+    <select id="zoom-level" aria-label="PDF 缩放比例">
+      <option value="fit">适合宽度</option><option value="50">50%</option><option value="75">75%</option>
+      <option value="90">90%</option><option value="100">100%</option><option value="125">125%</option>
+      <option value="150">150%</option><option value="175">175%</option><option value="200">200%</option>
+      <option value="250">250%</option><option value="300">300%</option>
+    </select>
+    <button class="reader-step" id="zoom-in" aria-label="放大" title="放大">+</button>
+  </div>
+  <div class="reader-controls reader-tools">
+    <div class="reader-find" role="search" aria-label="PDF 正文查找">
+      <input type="search" id="fulltext" aria-label="查找论文正文" aria-keyshortcuts="Meta+F Control+F" placeholder="查找正文" autocomplete="off">
+      <span class="match-count" id="find-count" role="status" aria-live="polite"></span>
+      <button id="find-previous" aria-label="上一个匹配" title="上一个匹配（Shift+Enter）">↑</button>
+      <button id="find-next" aria-label="下一个匹配" title="下一个匹配（Enter）">↓</button>
+    </div>
+  </div>
+</div>
+<div class="reader-body"><div class="sheet-pane" id="sheet-pane"><div class="pdf-stack" id="sheet" role="document" aria-label="PDF 原文"></div></div></div>
+</section>
+</main>
+<dialog id="modal" aria-labelledby="modal-title"><div class="modal-head"><h2 id="modal-title"></h2><button class="quiet" id="close-modal" aria-label="关闭对话框">关闭</button></div><div class="modal-body" id="modal-body"></div><div class="modal-foot" id="modal-foot"></div></dialog>
+<div id="status" role="status" hidden></div>
+<script type="module" src="/prototype.js"></script>
+</body>
+</html>
