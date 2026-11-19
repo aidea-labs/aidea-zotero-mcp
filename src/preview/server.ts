@@ -61,7 +61,7 @@ export function createPreviewServer(service: ZoteroService, options: {
   async function staticFile(pathname: string, res: ServerResponse) {
     let file: string;
     let assetRoot: string;
-    if (['/', '/prototype.html', '/prototype.js'].includes(pathname)) {
+    if (['/', '/prototype.html', '/prototype.js', '/prompt-host.js'].includes(pathname)) {
       assetRoot = options.uiDirectory ?? builtUiDirectory;
       const page = pathname === '/' || pathname === '/prototype.html';
       file = resolve(assetRoot, page ? 'prototype.html' : pathname.slice(1));

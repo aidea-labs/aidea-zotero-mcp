@@ -1,8 +1,12 @@
 /** HTML 原型使用真实服务。每次搜索/选文献有独立请求身份，迟到结果不能覆盖后来的操作。 */
+import { connectPromptHost } from './prompt-host.js';
 
 const $ = id => document.getElementById(id);
+const embeddedApp = document.documentElement.dataset.zoteroApp === 'mcp';
+const promptHost = connectPromptHost(window, undefined, showAgentSearch).catch(() => null);
 const library = 'user:0';
 let items = [], selected = null, collections = [], folder = '', offset = 0, nextOffset = null;
+let agentSearch;
 let detailMode = 'info', parts = {}, listVersion = 0, detailVersion = 0, readerVersion = 0;
 let listAbort, detailAbort, searchVersion = 0, findTimer, statusTimer, currentReader;
 let pdfModule, modalVersion = 0;
@@ -28,6 +32,14 @@ function notify(text) { clearTimeout(statusTimer); $('status').textContent = tex
 function report(error) { if (error.name !== 'AbortError') notify(error.message || '操作未完成，请重试。'); }
 function params(ref = {}) { return new URLSearchParams({ library, ...ref }); }
 async function request(route, { query, signal, refs, binary = false } = {}) {
+  if (embeddedApp) {
+    const host = await promptHost;
+    signal?.throwIfAborted();
+    if (!host?.callTool) throw new Error('客户端未提供 Zotero 文库读取。');
+    const value = await host.callTool({ route, params: Object.fromEntries(query ?? []), ...(refs ? { refs } : {}) });
+    signal?.throwIfAborted();
+    return value;
+  }
   const response = await fetch('/api/' + route + (query ? '?' + query : ''), {
     method: refs ? 'POST' : 'GET', credentials: 'same-origin', signal,
     headers: { 'X-Aidea-Preview': '1', ...(refs ? { 'Content-Type': 'application/json' } : {}) },
@@ -45,6 +57,7 @@ function showResults() {
   activate('library');
 }
 async function submitSearch() {
+  agentSearch = undefined;
   offset = 0; detailAbort?.abort(); detailVersion++; selected = null; parts = {};
   $('detail').hidden = true; $('library-view').classList.remove('has-detail'); setDetailOpen(false);
   showResults(); await loadItems();
@@ -57,24 +70,47 @@ async function loadItems() {
   $('pagination').hidden = true;
   $('result-page').textContent = ''; $('rows').setAttribute('aria-busy', 'true');
   try {
-    const result = await request('items', { query: params({ query: $('query').value, ...(folder ? { collection: folder } : {}), offset: String(offset) }), signal: listAbort.signal });
+    const search = agentSearch ?? { query: $('query').value, ...(folder ? { collection: folder } : {}) };
+    const result = await request('items', { query: params({ ...search, offset: String(offset) }), signal: listAbort.signal });
     if (version !== listVersion) return;
-    items = result.value.items; nextOffset = result.value.nextOffset;
-    renderRows(); updateCounter(result.value.matched);
-    $('rows').parentElement.scrollTop = 0;
-    $('previous-results').disabled = offset === 0; $('next-results').disabled = nextOffset === null;
-    $('pagination').hidden = offset === 0 && nextOffset === null;
-    $('result-page').textContent = items.length ? (offset + 1) + '–' + (offset + items.length) : '';
-    if (!selected || !items.some(p => identity(p.ref) === identity(selected.ref))) {
-      detailAbort?.abort(); detailVersion++; selected = null; $('detail').replaceChildren(); $('detail').hidden = true;
-      $('library-view').classList.remove('has-detail'); setDetailOpen(false);
-    }
-    if (result.value.notice) notify(result.value.notice);
+    renderSearchResult(result.value);
   } catch (error) {
     if (version !== listVersion || error.name === 'AbortError') return;
     $('counter').textContent = '文献读取失败';
     $('empty').hidden = false; $('empty').replaceChildren(el('p', error.message), btn('重试', loadItems));
   } finally { if (version === listVersion) $('rows').setAttribute('aria-busy', 'false'); }
+}
+function renderSearchResult(result) {
+  items = result.items; nextOffset = result.nextOffset;
+  renderRows(); updateCounter(result.matched);
+  $('rows').parentElement.scrollTop = 0;
+  $('previous-results').disabled = offset === 0; $('next-results').disabled = nextOffset === null;
+  $('pagination').hidden = offset === 0 && nextOffset === null;
+  $('result-page').textContent = items.length ? (offset + 1) + '–' + (offset + items.length) : '';
+  if (!selected || !items.some(p => identity(p.ref) === identity(selected.ref))) {
+    detailAbort?.abort(); detailVersion++; selected = null; $('detail').replaceChildren(); $('detail').hidden = true;
+    $('library-view').classList.remove('has-detail'); setDetailOpen(false);
+  }
+  if (result.notice) notify(result.notice);
+}
+function showAgentSearch(message) {
+  const search = message?.structuredContent?.zoteroSearch;
+  const data = search?.result?.content?.find(item => item.type === 'text')?.text;
+  if (!embeddedApp || !search?.args || typeof data !== 'string') return;
+  let result;
+  try { result = JSON.parse(data).value; } catch { return; }
+  if (!Array.isArray(result?.items) || !Number.isSafeInteger(result.matched)) return;
+  const { query = '', limit = 20, offset: start = 0, library: scope = library, ...filters } = search.args;
+  agentSearch = { library: scope, query, limit };
+  for (const key of ['author', 'yearFrom', 'yearTo', 'tag', 'collection']) {
+    if (filters[key] !== undefined) agentSearch[key] = filters[key];
+  }
+  offset = start;
+  $('query').value = query;
+  listVersion++; listAbort?.abort();
+  $('rows').setAttribute('aria-busy', 'false');
+  showResults();
+  renderSearchResult(result);
 }
 let matched = 0;
 function updateCounter(count = matched) {
@@ -103,7 +139,7 @@ function renderRows() {
     citePaper.setAttribute('aria-label', '引用 ' + (paper.title || '无题名'));
     actions.append(citePaper);
     content.append(actions);
-    content.addEventListener('dblclick', event => {
+    if (!embeddedApp) content.addEventListener('dblclick', event => {
       if (!event.target.closest('.result-actions')) selectPaper(paper).then(() => openSelected()).catch(report);
     });
     row.append(checkCell, content); $('rows').append(row);
@@ -153,7 +189,7 @@ function renderDetail() {
   const actions = el('div', undefined, 'action-stack');
   const open = btn('打开 PDF', openSelected, 'primary');
   open.disabled = !parts.attachments?.some(a => a.mimeType === 'application/pdf' && a.available);
-  actions.append(open);
+  if (!embeddedApp) actions.append(open);
   actions.append(btn('导出 BibTeX', () => showBib([p]))); root.append(actions);
   if (parts.attachmentsError) addError(root, parts.attachmentsError);
   const tabs = el('div', undefined, 'detail-tabs');
@@ -174,7 +210,7 @@ function renderDetail() {
       for (const a of parts.attachments) {
         const card = el('div', undefined, 'note-card'); card.append(el('h2', a.title || '附件', 'attachment-name'));
         card.append(el('p', a.available ? (a.mimeType === 'application/pdf' ? '本地 PDF' : a.mimeType || '本地附件') : '本机无可读取文件', 'meta'));
-        if (a.available && a.mimeType === 'application/pdf') card.append(btn('打开阅读', () => openPaper(p, a)));
+        if (!embeddedApp && a.available && a.mimeType === 'application/pdf') card.append(btn('打开阅读', () => openPaper(p, a)));
         root.append(card);
       }
     }
@@ -677,10 +713,17 @@ $('library-tab').addEventListener('click', () => activate('library'));
 function bindSearchForm(id, search) {
   const form = $(id);
   form.addEventListener('submit', event => { event.preventDefault(); search(); });
+  if (!embeddedApp) return;
+  // 宿主隔离框禁止提交 HTML 表单，搜索仍通过 MCP 的只读工具执行。
+  const button = form.querySelector('button');
+  button.type = 'button'; button.addEventListener('click', search);
+  form.querySelector('input').addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); search(); }
+  });
 }
 bindSearchForm('home-form', () => { $('query').value = $('home-query').value; void submitSearch(); void loadCollections(); });
 bindSearchForm('results-form', () => { void submitSearch(); });
-$('previous-results').addEventListener('click', () => { offset = Math.max(0, offset - 100); void loadItems(); });
+$('previous-results').addEventListener('click', () => { offset = Math.max(0, offset - (agentSearch?.limit ?? 100)); void loadItems(); });
 $('next-results').addEventListener('click', () => { if (nextOffset !== null) { offset = nextOffset; void loadItems(); } });
 $('select-all').addEventListener('change', event => { items.forEach(p => selectForExport(p, event.target.checked)); renderRows(); updateCounter(); });
 $('batch').addEventListener('click', () => { showBib([...checked.values()]).catch(report); });
