@@ -8,7 +8,6 @@ import { ZoteroError } from '../base/errors.js';
 import { librarySchema, keySchema, refSchema } from '../base/validation.js';
 
 const query = z.string().trim().min(1).max(1000);
-const refs = z.array(refSchema).min(1).max(30);
 const text = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
 
 export function createServer(service: ZoteroService) {
@@ -73,7 +72,7 @@ export function createServer(service: ZoteroService) {
   register('get-notes', '读取母文献已有的子笔记，返回来源 HTML。空笔记列表表示该文献没有子笔记。',
     refSchema.shape, (input, signal) => service.notes(input, signal));
   register('export-bibtex', '将明确选择的文献导出为 BibTeX 文本，保留已有引用键并报告冲突。保存文件由宿主负责。',
-    { refs }, (input, signal) => service.bibtex(input.refs, signal));
+    { refs: z.array(refSchema).min(1) }, (input, signal) => service.bibtex(input.refs, signal));
   register('open-reader', '请求宿主打开指定 PDF，可定位 PDF 文件页序。host_required 表示当前没有阅读 UI，不能报告已打开。', {
     ...refSchema.shape, page: z.number().int().min(1).max(10000).default(1),
   }, (input, signal) => service.open(input, input.page, signal));
