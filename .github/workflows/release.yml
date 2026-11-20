@@ -3,13 +3,6 @@ name: Release
 on:
   push:
     branches: [main]
-    paths: [package.json]
-  workflow_dispatch:
-    inputs:
-      first_version:
-        description: Exact package version to stage for the first publication
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -19,16 +12,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
-    if: github.ref == 'refs/heads/main'
+  release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
     outputs:
-      tag: ${{ steps.version.outputs.tag }}
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
-      - name: Check out the merged commit
+      - name: Update the release PR or tag a merged release
+        id: release
+        uses: googleapis/release-please-action@7987652d64b4581673a76e33ad5e98e3dd56832f # v4.1.3
+        with:
+          release-type: node
+
+  build:
+    needs: release-please
+    if: needs.release-please.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tagged release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          ref: ${{ needs.release-please.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Node.js
@@ -37,48 +46,23 @@ jobs:
           node-version: '24'
           package-manager-cache: false
 
-      - name: Resolve the release version
-        id: version
+      - name: Verify the package and lockfile versions
         env:
-          PREVIOUS_SHA: ${{ github.event.before }}
-          FIRST_VERSION: ${{ inputs.first_version }}
+          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
         run: |
           node --input-type=commonjs - <<'NODE'
-          const { execFileSync } = require('node:child_process');
-          const { appendFileSync } = require('node:fs');
           const { version } = require('./package.json');
-          const stable = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
-          if (process.env.GITHUB_EVENT_NAME === 'workflow_dispatch') {
-            if (!stable.test(version) || process.env.FIRST_VERSION !== version) {
-              throw Error('Enter the exact stable version from package.json.');
-            }
-          } else {
-            const previousSha = process.env.PREVIOUS_SHA;
-            if (!previousSha || /^0+$/.test(previousSha)) process.exit(0);
-            const previous = JSON.parse(execFileSync('git', ['show', previousSha + ':package.json'], {
-              encoding: 'utf8',
-            })).version;
-            if (previous === version) process.exit(0);
-            if (!stable.test(previous) || !stable.test(version)) throw Error('Expected stable x.y.z versions.');
-            const old = previous.split('.').map(BigInt);
-            const current = version.split('.').map(BigInt);
-            const changed = current.findIndex((part, index) => part !== old[index]);
-            if (current[changed] <= old[changed]) throw Error('The package version must increase.');
-          }
-
           const lock = require('./package-lock.json');
-          if (lock.version !== version || lock.packages[''].version !== version) {
-            throw Error('Update package-lock.json along with package.json.');
+          if (version !== process.env.RELEASE_VERSION ||
+              lock.version !== version || lock.packages[''].version !== version) {
+            throw Error('The release, package and lockfile versions must match.');
           }
-          appendFileSync(process.env.GITHUB_OUTPUT, 'tag=v' + version + '\n');
           NODE
 
       - name: Install dependencies
-        if: steps.version.outputs.tag != ''
         run: npm ci
 
       - name: Build and check the npm package
-        if: steps.version.outputs.tag != ''
         run: |
           version=$(node -p "require('./package.json').version")
           mkdir -p release
@@ -92,7 +76,6 @@ jobs:
           grep -Fxq 'package/dist/ui/prompt-host.js' package-files.txt
 
       - name: Upload the npm package
-        if: steps.version.outputs.tag != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: npm-package
@@ -100,8 +83,8 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: build
-    if: github.event_name == 'push' && needs.build.outputs.tag != ''
+    needs: [release-please, build]
+    if: needs.release-please.outputs.version != '0.1.0'
     runs-on: ubuntu-latest
     environment: npm
     permissions:
@@ -125,17 +108,11 @@ jobs:
         run: npm publish release/*.tgz --access public
 
   bootstrap-stage:
-    needs: build
-    if: github.event_name == 'workflow_dispatch' && needs.build.outputs.tag != ''
+    needs: [release-please, build]
+    if: needs.release-please.outputs.version == '0.1.0'
     runs-on: ubuntu-latest
     environment: npm-bootstrap
     steps:
-      - name: Verify the package has no public release
-        run: |
-          status=$(curl --silent --show-error --max-time 30 --output /dev/null --write-out '%{http_code}' \
-            'https://registry.npmjs.org/@aidea-labs%2Faidea-zotero-mcp')
-          test "$status" = 404
-
       - name: Set up Node.js for staged publishing
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
@@ -149,6 +126,9 @@ jobs:
           name: npm-package
           path: release
 
+      - name: Install the npm CLI with staged-publishing support
+        run: npm install --global npm@11.15.0
+
       - name: Stage the first version for approval on npmjs.com
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
@@ -157,8 +137,7 @@ jobs:
           npm stage publish release/*.tgz --access public
 
   bootstrap-confirm:
-    needs: [build, bootstrap-stage]
-    if: github.event_name == 'workflow_dispatch'
+    needs: [release-please, bootstrap-stage]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -176,14 +155,14 @@ jobs:
 
       - name: Wait for npm approval and verify the public package
         env:
-          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
         run: |
           node --input-type=module - <<'NODE'
           import { createHash } from 'node:crypto';
           import { readFileSync } from 'node:fs';
           import { setTimeout } from 'node:timers/promises';
 
-          const version = process.env.RELEASE_TAG.slice(1);
+          const version = process.env.RELEASE_VERSION;
           const archive = readFileSync('release/aidea-labs-aidea-zotero-mcp-' + version + '.tgz');
           const expected = 'sha512-' + createHash('sha512').update(archive).digest('base64');
           const url = 'https://registry.npmjs.org/@aidea-labs%2Faidea-zotero-mcp/' + version;
@@ -206,8 +185,8 @@ jobs:
           throw Error('Approval is still pending. Approve the package on npmjs.com, then rerun failed jobs.');
           NODE
 
-  github-release:
-    needs: [build, publish, bootstrap-confirm]
+  upload-release-asset:
+    needs: [release-please, build, publish, bootstrap-confirm]
     if: >-
       !cancelled() && needs.build.result == 'success' &&
       (needs.publish.result == 'success' || needs.bootstrap-confirm.result == 'success')
@@ -221,10 +200,8 @@ jobs:
           name: npm-package
           path: release
 
-      - name: Create the GitHub Release
+      - name: Attach the published package to the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.build.outputs.tag }}
-        run: >-
-          gh release create "$RELEASE_TAG" release/*.tgz
-          --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$RELEASE_TAG" --generate-notes
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
+        run: gh release upload "$RELEASE_TAG" release/*.tgz --repo "$GITHUB_REPOSITORY" --clobber
