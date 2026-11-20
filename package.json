@@ -3,7 +3,6 @@
   "version": "0.1.0",
   "description": "A Zotero MCP server with an interactive UI for searching papers, reading PDFs, exporting BibTeX, and human–AI research collaboration.",
   "type": "module",
-  "private": true,
   "license": "MIT",
   "engines": {
     "node": ">=24.13.0"
@@ -17,7 +16,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/copy-ui.mjs",
+    "prepack": "npm run build",
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
