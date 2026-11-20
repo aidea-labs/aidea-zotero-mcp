@@ -5,10 +5,12 @@ import { z } from 'zod';
 import { keySchema, librarySchema, refSchema } from '../base/validation.js';
 import { ZoteroError } from '../base/errors.js';
 import type { ZoteroService } from '../base/service.js';
+import { extractPrompt, paperIdSchema, summarizePrompt } from './prompts.js';
 
 export const zoteroAppUri = 'ui://aidea-zotero/library.html';
 const mimeType = 'text/html;profile=mcp-app';
-const routeSchema = z.enum(['collections', 'items', 'item', 'attachments', 'notes', 'bibtex']);
+const routeSchema = z.enum(['collections', 'items', 'item', 'attachments', 'notes', 'bibtex',
+  'prompts/summarize', 'prompts/extract']);
 const asset = (name: string) => readFile(new URL('../ui/' + name, import.meta.url), 'utf8');
 
 async function appHtml(): Promise<string> {
@@ -57,6 +59,8 @@ export function registerZoteroApp(server: McpServer, service: ZoteroService) {
         case 'bibtex':
           if (!refs?.length) throw new ZoteroError('invalid_request', '请选择要导出的文献。');
           result = await service.bibtex(refs, signal); break;
+        case 'prompts/summarize': result = summarizePrompt(paperIdSchema.parse(params.paper_id)); break;
+        case 'prompts/extract': result = extractPrompt(paperIdSchema.parse(params.paper_id), params.question ?? ''); break;
       }
       process.stderr.write(JSON.stringify({ scope: 'zotero.app', route, phase: 'completed', elapsedMs: Date.now() - started }) + '\n');
       return { content: [{ type: 'text' as const, text: JSON.stringify(result) }] };

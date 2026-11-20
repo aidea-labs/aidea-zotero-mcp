@@ -1,4 +1,4 @@
-/** MCP 注册工具和页面资源，领域读取统一交给 base。 */
+/** MCP 注册工具、资源和用户触发的 Prompt，领域读取统一交给 base。 */
 import { randomUUID } from 'node:crypto';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -6,6 +6,7 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ZoteroService } from '../base/service.js';
 import { ZoteroError } from '../base/errors.js';
 import { librarySchema, keySchema, refSchema } from '../base/validation.js';
+import { extractPrompt, extractQuestionSchema, paperIdSchema, summarizePrompt } from './prompts.js';
 import { registerZoteroApp, zoteroAppUri } from './zotero-app.js';
 
 const query = z.string().trim().min(1).max(1000);
@@ -86,6 +87,19 @@ export function createServer(service: ZoteroService) {
       return { contents: [result.value] };
     });
 
+  server.registerPrompt('summarize', {
+    title: '总结文章',
+    description: '给已选定的 Zotero 论文生成总结请求。',
+    argsSchema: { paper_id: paperIdSchema.describe('Zotero 条目身份，例如 user:0/ABCD2345。') },
+  }, ({ paper_id }) => summarizePrompt(paper_id));
+  server.registerPrompt('extract', {
+    title: '提取信息',
+    description: '根据问题生成对指定 Zotero 论文的提取请求。',
+    argsSchema: {
+      paper_id: paperIdSchema.describe('Zotero 条目身份，例如 user:0/ABCD2345。'),
+      question: extractQuestionSchema.describe('用户想从论文中提取的问题。'),
+    },
+  }, ({ paper_id, question }) => extractPrompt(paper_id, question));
   registerZoteroApp(server, service);
 
   return server;

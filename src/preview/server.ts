@@ -10,16 +10,20 @@ import { ZoteroService } from '../base/service.js';
 import { ZoteroError } from '../base/errors.js';
 import { within } from '../base/files.js';
 import { librarySchema, keySchema, refSchema } from '../base/validation.js';
+import { extractPrompt, extractQuestionSchema, paperIdSchema, summarizePrompt } from '../mcp/prompts.js';
 
 const cookieName = 'aidea_zotero_preview';
-const maxExportRequestBytes = 1024 * 1024;
+const maxRequestBytes = 1024 * 1024;
 const builtUiDirectory = fileURLToPath(new URL('../ui/', import.meta.url));
 const pdfJsDirectory = dirname(createRequire(import.meta.url).resolve('pdfjs-dist/package.json'));
 const actionNames = new Map([
   ['/api/collections', 'collections'], ['/api/items', 'search'], ['/api/item', 'item'],
   ['/api/notes', 'notes'], ['/api/attachments', 'attachments'], ['/api/pdf', 'pdf'],
   ['/api/fulltext', 'fulltext'], ['/api/bibtex', 'bibtex'],
+  ['/api/prompts/summarize', 'summarize_prompt'], ['/api/prompts/extract', 'extract_prompt'],
 ]);
+const postRoutes = new Set(['/api/bibtex', '/api/prompts/extract']);
+const extractRequest = z.object({ paper_id: paperIdSchema, question: extractQuestionSchema });
 const contentTypes: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.wasm': 'application/wasm',
   '.bcmap': 'application/octet-stream', '.pfb': 'application/octet-stream', '.ttf': 'font/ttf' };
@@ -47,7 +51,7 @@ export function createPreviewServer(service: ZoteroService, options: {
     const chunks = []; let size = 0;
     for await (const chunk of req) {
       size += chunk.length;
-      if (size > maxExportRequestBytes) throw new ZoteroError('invalid_request', '导出请求超过 1 MiB。');
+      if (size > maxRequestBytes) throw new ZoteroError('invalid_request', '请求内容超过 1 MiB。');
       chunks.push(chunk);
     }
     try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); }
@@ -112,7 +116,7 @@ export function createPreviewServer(service: ZoteroService, options: {
       if (!authorized(req) || req.headers['sec-fetch-site'] === 'cross-site') {
         throw new ZoteroError('access_denied', '页面会话已过期，请重新打开原型。');
       }
-      if (req.method !== (url.pathname === '/api/bibtex' ? 'POST' : 'GET')) {
+      if (req.method !== (postRoutes.has(url.pathname) ? 'POST' : 'GET')) {
         throw new ZoteroError('invalid_request', '该操作不支持此请求方式。');
       }
       log('validated');
@@ -121,6 +125,12 @@ export function createPreviewServer(service: ZoteroService, options: {
       const ref = () => refSchema.parse({ library, key: params.get('key') });
       let output: unknown;
       switch (url.pathname) {
+        case '/api/prompts/summarize': output = summarizePrompt(z.string().parse(params.get('paper_id'))); break;
+        case '/api/prompts/extract': {
+          const { paper_id, question } = extractRequest.parse(await body(req));
+          output = extractPrompt(paper_id, question);
+          break;
+        }
         case '/api/collections': output = await service.collections(library, signal); break;
         case '/api/items': output = await service.search({ library,
           query: z.string().max(1000).parse(params.get('query') ?? ''),

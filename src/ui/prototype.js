@@ -4,6 +4,7 @@ import { connectPromptHost } from './prompt-host.js';
 const $ = id => document.getElementById(id);
 const embeddedApp = document.documentElement.dataset.zoteroApp === 'mcp';
 const promptHost = connectPromptHost(window, undefined, showAgentSearch).catch(() => null);
+let promptPending = false;
 const library = 'user:0';
 let items = [], selected = null, collections = [], folder = '', offset = 0, nextOffset = null;
 let agentSearch;
@@ -31,19 +32,20 @@ const cite = p => p.fields.citationKey || /^Citation Key:\s*(.+)$/mi.exec(p.fiel
 function notify(text) { clearTimeout(statusTimer); $('status').textContent = text; $('status').hidden = false; statusTimer = setTimeout(() => { $('status').hidden = true; }, 6000); }
 function report(error) { if (error.name !== 'AbortError') notify(error.message || '操作未完成，请重试。'); }
 function params(ref = {}) { return new URLSearchParams({ library, ...ref }); }
-async function request(route, { query, signal, refs, binary = false } = {}) {
+async function request(route, { query, signal, refs, input, binary = false } = {}) {
   if (embeddedApp) {
     const host = await promptHost;
     signal?.throwIfAborted();
     if (!host?.callTool) throw new Error('客户端未提供 Zotero 文库读取。');
-    const value = await host.callTool({ route, params: Object.fromEntries(query ?? []), ...(refs ? { refs } : {}) });
+    const value = await host.callTool({ route, params: input ?? Object.fromEntries(query ?? []), ...(refs ? { refs } : {}) });
     signal?.throwIfAborted();
     return value;
   }
+  const payload = refs ? { refs } : input;
   const response = await fetch('/api/' + route + (query ? '?' + query : ''), {
-    method: refs ? 'POST' : 'GET', credentials: 'same-origin', signal,
-    headers: { 'X-Aidea-Preview': '1', ...(refs ? { 'Content-Type': 'application/json' } : {}) },
-    ...(refs ? { body: JSON.stringify({ refs }) } : {}),
+    method: payload ? 'POST' : 'GET', credentials: 'same-origin', signal,
+    headers: { 'X-Aidea-Preview': '1', ...(payload ? { 'Content-Type': 'application/json' } : {}) },
+    ...(payload ? { body: JSON.stringify(payload) } : {}),
   });
   if (!response.ok) { const body = await response.json(); throw new Error(body.error?.message || '读取失败，请重试。'); }
   return binary ? response.arrayBuffer() : response.json();
@@ -221,6 +223,10 @@ function renderDetail() {
     const dl = el('dl'); values.filter(([, value]) => value).forEach(([label, value]) => dl.append(el('dt', label), el('dd', value))); root.append(dl);
     if (p.tags.length) { root.append(el('h2', '标签')); const tags = el('div', undefined, 'tags'); p.tags.forEach(tag => tags.append(el('span', tag, 'tag'))); root.append(tags); }
   }
+  root.append(el('h2', '交给 AI'));
+  const tasks = el('div', undefined, 'action-stack');
+  tasks.append(btn('总结文章', () => summarizePaper(p)), btn('提取信息', () => showExtractPrompt(p)));
+  root.append(tasks);
 }
 async function openSelected() {
   const paper = selected;
@@ -693,8 +699,9 @@ async function moveFind(direction) {
   if (active.page !== entry.page) goToPdfPage(active.page, active);
   paintPdfMatches(entry);
 }
-function dialog(title, body, footer) {
+function dialog(title, body, footer, { showHeaderClose = true } = {}) {
   $('modal-title').textContent = title;
+  $('close-modal').hidden = !showHeaderClose;
   $('modal-body').replaceChildren(...body);
   $('modal-foot').replaceChildren(...footer);
   if (!$('modal').open) $('modal').showModal();
@@ -708,6 +715,88 @@ async function showBib(papers) {
     const url = URL.createObjectURL(new Blob([bibtex], { type: 'application/x-bibtex' }));
     const link = el('a'); link.href = url; link.download = 'references.bib'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   }, 'primary')]);
+}
+function showPromptText(prompt, unconfirmed) {
+  const content = el('pre', prompt);
+  const status = el('p');
+  status.setAttribute('role', 'status');
+  status.hidden = !unconfirmed;
+  status.textContent = unconfirmed ? '发送结果未确认，请先查看当前对话。' : '';
+  const copy = btn('复制请求', async () => {
+    try {
+      await navigator.clipboard.writeText(prompt);
+    } catch {
+      const selection = window.getSelection();
+      if (selection) {
+        const range = document.createRange();
+        range.selectNodeContents(content);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+      status.textContent = (unconfirmed ? '发送结果未确认，请先查看当前对话。' : '') + '请手动复制下方请求。';
+      status.hidden = false;
+      return;
+    }
+    copy.textContent = '已复制';
+  }, 'primary');
+  dialog('复制如下内容发送至 AI', [status, content], [btn('关闭', () => $('modal').close()), copy], { showHeaderClose: false });
+}
+async function sendPaperPrompt(paper, loadText, afterSend) {
+  if (promptPending) return;
+  promptPending = true;
+  const version = modalVersion;
+  const paperId = identity(paper.ref);
+  const samePaper = () => {
+    const visiblePaper = currentReader?.paper ?? selected;
+    return version === modalVersion && visiblePaper && identity(visiblePaper.ref) === paperId;
+  };
+  try {
+    const prompt = await loadText(paperId);
+    const host = await promptHost;
+    if (!samePaper()) return;
+    if (!host?.send) {
+      showPromptText(prompt, false);
+      return;
+    }
+    const delivery = await host.send(prompt);
+    if (delivery === 'sent') {
+      if (samePaper()) afterSend?.();
+      notify('请求已发送到当前对话。');
+      return;
+    }
+    if (samePaper()) showPromptText(prompt, delivery === 'unconfirmed');
+  } finally {
+    promptPending = false;
+  }
+}
+function summarizePaper(paper) {
+  return sendPaperPrompt(paper, async paperId => {
+    const result = await request('prompts/summarize', { query: new URLSearchParams({ paper_id: paperId }) });
+    return result.messages[0].content.text;
+  });
+}
+function showExtractPrompt(paper) {
+  modalVersion++;
+  const input = el('textarea');
+  input.setAttribute('aria-label', '要提取的信息');
+  input.placeholder = '这篇文章里使用的是什么数据？';
+  const submit = btn('请求', async () => {
+    const fields = input.value.trim();
+    if (!fields || promptPending) return;
+    submit.disabled = true;
+    try {
+      await sendPaperPrompt(paper, async paperId => {
+        const result = await request('prompts/extract', { input: { paper_id: paperId, question: fields } });
+        return result.messages[0].content.text;
+      }, () => $('modal').close());
+    } finally {
+      submit.disabled = !input.value.trim();
+    }
+  }, 'primary');
+  submit.disabled = true;
+  input.addEventListener('input', () => { submit.disabled = !input.value.trim() || promptPending; });
+  dialog('提取信息', [input], [submit], { showHeaderClose: false });
+  input.focus();
 }
 $('library-tab').addEventListener('click', () => activate('library'));
 function bindSearchForm(id, search) {
@@ -781,6 +870,7 @@ document.addEventListener('keydown', event => {
     event.preventDefault(); $('fulltext').focus(); $('fulltext').select();
   }
 });
+$('summarize-reader').addEventListener('click', () => { void summarizePaper(currentReader.paper).catch(report); });
 $('modal').addEventListener('close', () => { modalVersion++; });
 $('close-modal').addEventListener('click', () => $('modal').close());
 $('modal').addEventListener('click', event => {

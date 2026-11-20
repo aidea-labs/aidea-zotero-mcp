@@ -1,4 +1,4 @@
-/** 与父宿主协商 Zotero 的只读调用并接收检索结果。 */
+/** MCP Apps 的发送能力由父宿主握手声明；普通浏览器直接使用展示回退。 */
 let requestSequence = 0;
 function rpc(view, method, params, targetOrigin, waitMs) {
   const id = ++requestSequence;
@@ -37,9 +37,15 @@ export async function connectPromptHost(view, waitMs = 3000, onToolResult) {
       && event.data.method === 'ui/notifications/tool-result') onToolResult(event.data.params);
   });
   view.parent.postMessage({ jsonrpc: '2.0', method: 'ui/notifications/initialized', params: {} }, origin);
-  if (!capabilities?.serverTools) return null;
+  if (!capabilities?.message?.text && !capabilities?.serverTools) return null;
 
   return {
+    send: capabilities.message?.text ? async text => {
+      const reply = await rpc(view, 'ui/message', { role: 'user', content: [{ type: 'text', text }] }, origin, waitMs);
+      if (!reply) return 'unconfirmed';
+      if (!reply.data.result || reply.data.error || reply.data.result.isError) return 'rejected';
+      return 'sent';
+    } : undefined,
     callTool: capabilities.serverTools ? async args => {
       const reply = await rpc(view, 'tools/call', { name: 'zotero-app-read', arguments: args }, origin, 12000);
       const result = reply?.data.result;
