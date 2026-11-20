@@ -1,4 +1,4 @@
-/** MCP 仅做输入校验、工具与资源注册，领域规则统一交给 base。 */
+/** MCP 注册工具、资源和用户触发的 Prompt，领域读取统一交给 base。 */
 import { randomUUID } from 'node:crypto';
 import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
@@ -6,6 +6,8 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { ZoteroService } from '../base/service.js';
 import { ZoteroError } from '../base/errors.js';
 import { librarySchema, keySchema, refSchema } from '../base/validation.js';
+import { extractPrompt, extractQuestionSchema, paperIdSchema, summarizePrompt } from './prompts.js';
+import { registerZoteroApp, zoteroAppUri } from './zotero-app.js';
 
 const query = z.string().trim().min(1).max(1000);
 const text = (value: unknown) => ({ content: [{ type: 'text' as const, text: JSON.stringify(value) }] });
@@ -18,9 +20,10 @@ export function createServer(service: ZoteroService) {
   });
   // 每个请求只记录安全元数据，stdout 专用于 stdio JSON-RPC。
   function register<S extends z.ZodRawShape>(name: string, description: string, shape: S,
-    run: (input: z.infer<z.ZodObject<S>>, signal: AbortSignal) => Promise<unknown>) {
+    run: (input: z.infer<z.ZodObject<S>>, signal: AbortSignal) => Promise<unknown>, appUri?: string) {
     const publicShape: z.ZodRawShape = shape;
     server.registerTool(name, { description, inputSchema: publicShape,
+      ...(appUri && { _meta: { ui: { resourceUri: appUri } } }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } },
     async (args, extra): Promise<CallToolResult> => {
       const requestId = randomUUID();
@@ -53,7 +56,7 @@ export function createServer(service: ZoteroService) {
     yearTo: z.number().int().min(1).max(9999).optional(), tag: z.string().max(300).optional(),
     collection: keySchema.optional(), limit: z.number().int().min(1).max(100).default(20),
     offset: z.number().int().min(0).max(9999).default(0),
-  }, (input, signal) => service.search(input, signal));
+  }, (input, signal) => service.search(input, signal), zoteroAppUri);
   register('resolve-item', '按 DOI、引用键、条目 key、题名或作者年份匹配论文。多个候选时由用户或调用方消歧。', {
     library: librarySchema.default('user:0'), query, limit: z.number().int().min(1).max(30).default(10),
   }, (input, signal) => service.resolve(input, signal));
@@ -83,6 +86,21 @@ export function createServer(service: ZoteroService) {
       const result = await service.resource(uri.href, extra.signal);
       return { contents: [result.value] };
     });
+
+  server.registerPrompt('summarize', {
+    title: '总结文章',
+    description: '给已选定的 Zotero 论文生成总结请求。',
+    argsSchema: { paper_id: paperIdSchema.describe('Zotero 条目身份，例如 user:0/ABCD2345。') },
+  }, ({ paper_id }) => summarizePrompt(paper_id));
+  server.registerPrompt('extract', {
+    title: '提取信息',
+    description: '根据问题生成对指定 Zotero 论文的提取请求。',
+    argsSchema: {
+      paper_id: paperIdSchema.describe('Zotero 条目身份，例如 user:0/ABCD2345。'),
+      question: extractQuestionSchema.describe('用户想从论文中提取的问题。'),
+    },
+  }, ({ paper_id, question }) => extractPrompt(paper_id, question));
+  registerZoteroApp(server, service);
 
   return server;
 }

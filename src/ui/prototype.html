@@ -120,6 +120,8 @@ dialog::backdrop{background:#17263a35}
 .modal-head h2{font-size:16px;margin:0}
 .modal-body{padding:18px 22px}
 .modal-body p{font-size:12px;color:var(--muted);margin:0 0 13px}
+.modal-body textarea{display:block;width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:6px;min-height:88px;resize:vertical;font-size:13px;line-height:1.7}
+.modal-body textarea::placeholder{color:var(--muted);opacity:1}
 .modal-body pre{margin:0;white-space:pre-wrap;word-break:break-word;font:12px/1.7 ui-monospace,SFMono-Regular,monospace;background:var(--bg);padding:14px;border-radius:7px;max-height:50vh;overflow:auto}
 .modal-foot{padding:14px 22px;display:flex;justify-content:flex-end;gap:8px;border-top:1px solid var(--line)}
 #status{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#263244;color:white;max-width:90%;border-radius:7px;padding:10px 16px;font-size:12px;box-shadow:0 4px 15px #12233c22}
@@ -255,6 +257,7 @@ dialog::backdrop{background:#17263a35}
       <button id="find-previous" aria-label="上一个匹配" title="上一个匹配（Shift+Enter）">↑</button>
       <button id="find-next" aria-label="下一个匹配" title="下一个匹配（Enter）">↓</button>
     </div>
+    <button id="summarize-reader">总结文章</button>
   </div>
 </div>
 <div class="reader-body"><div class="sheet-pane" id="sheet-pane"><div class="pdf-stack" id="sheet" role="document" aria-label="PDF 原文"></div></div></div>
