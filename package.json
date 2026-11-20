@@ -4,6 +4,10 @@
   "description": "A Zotero MCP server with an interactive UI for searching papers, reading PDFs, exporting BibTeX, and human–AI research collaboration.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aidea-labs/aidea-zotero-mcp.git"
+  },
   "engines": {
     "node": ">=24.13.0"
   },
@@ -22,7 +26,7 @@
     "dev": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && tsx --test tests/*.test.ts",
-    "check": "npm run typecheck && node --check ui/prototype.js && npm test && npm run build",
+    "check": "npm run typecheck && node --check src/ui/prototype.js && node --check src/ui/prompt-host.js && npm run build",
     "preview": "npm run build && node dist/preview/index.js"
   },
   "dependencies": {
