@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/aidea-labs/aidea-zotero-mcp/compare/v0.1.0...v0.1.1) (2026-11-21)
+
+
+### Bug Fixes
+
+* recover the first npm release after staging failure ([a692df7](https://github.com/aidea-labs/aidea-zotero-mcp/commit/a692df7e9271435ae20ee40af99fc7775605839e))
+
 ## 0.1.0 (2026-11-20)
 
 
