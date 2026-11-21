@@ -1,6 +1,6 @@
 {
   "name": "@aidea-labs/aidea-zotero-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Zotero MCP server with an interactive UI for searching papers, reading PDFs, exporting BibTeX, and human–AI research collaboration.",
   "type": "module",
   "license": "MIT",
