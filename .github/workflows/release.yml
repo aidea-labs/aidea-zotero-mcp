@@ -4,11 +4,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      first_release_run_id:
-        description: Run ID that built the first npm release
-        type: string
-        required: true
 
 permissions:
   contents: read
@@ -19,49 +14,33 @@ concurrency:
 
 jobs:
   release-please:
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
-      actions: read
       contents: write
       pull-requests: write
     outputs:
-      created: ${{ steps.release.outputs.release_created || steps.recover.outputs.ready }}
-      tag: ${{ steps.release.outputs.tag_name || steps.recover.outputs.tag }}
-      version: ${{ steps.release.outputs.version || steps.recover.outputs.version }}
+      created: ${{ steps.release.outputs.release_created }}
+      tag: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
       sha: ${{ steps.release.outputs.sha }}
     steps:
       - name: Update the release PR or tag a merged release
         id: release
-        if: github.event_name == 'push'
         uses: googleapis/release-please-action@7987652d64b4581673a76e33ad5e98e3dd56832f # v4.1.3
         with:
           release-type: node
 
-      - name: Identify the previously built first release
-        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
-        id: recover
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN: ${{ inputs.first_release_run_id }}
-        run: |
-          [[ "$SOURCE_RUN" =~ ^[0-9]+$ ]]
-          tag_sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/v0.1.0" --jq .sha)
-          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN")
-          jq -e --arg sha "$tag_sha" '
-            .head_sha == $sha and .event == "push" and .head_branch == "main" and
-            .path == ".github/workflows/release.yml" and .status == "completed"
-          ' <<< "$run" >/dev/null
-          echo 'ready=true' >> "$GITHUB_OUTPUT"
-          echo 'tag=v0.1.0' >> "$GITHUB_OUTPUT"
-          echo 'version=0.1.0' >> "$GITHUB_OUTPUT"
-
   build:
     needs: release-please
-    if: needs.release-please.outputs.created == 'true'
+    if: >-
+      !cancelled() &&
+      (needs.release-please.outputs.created == 'true' ||
+       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: read
+    outputs:
+      version: ${{ steps.package.outputs.version }}
+      tag: ${{ steps.package.outputs.tag }}
     steps:
       - name: Check out the tagged release commit
         if: github.event_name == 'push'
@@ -71,7 +50,6 @@ jobs:
           persist-credentials: false
 
       - name: Set up Node.js
-        if: github.event_name == 'push'
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: '24'
@@ -101,18 +79,47 @@ jobs:
           mkdir -p release
           npm pack --pack-destination release
 
-      - name: Recover the existing first-release package
+      - name: Download the public 0.1.0 package for backfill
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: npm-package
-          path: release
-          github-token: ${{ github.token }}
-          run-id: ${{ inputs.first_release_run_id }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          archive=aidea-labs-aidea-zotero-mcp-0.1.0.tgz
+          gh release download v0.1.0 --repo "$GITHUB_REPOSITORY" --pattern "$archive" --dir release
+          expected=$(npm view @aidea-labs/aidea-zotero-mcp@0.1.0 dist.integrity --registry=https://registry.npmjs.org)
+          actual="sha512-$(openssl dgst -sha512 -binary "release/$archive" | openssl base64 -A)"
+          test "$actual" = "$expected"
+
+      - name: Pack the same build under the short name
+        id: package
+        env:
+          RELEASE_VERSION: ${{ needs.release-please.outputs.version || '0.1.0' }}
+          RELEASE_TAG: ${{ needs.release-please.outputs.tag || 'v0.1.0' }}
+        run: |
+          work=$(mktemp -d)
+          mkdir "$work/original" "$work/short"
+          tar -xzf "release/aidea-labs-aidea-zotero-mcp-$RELEASE_VERSION.tgz" -C "$work/original"
+          cp "$work/original/package/package.json" "$work/package.json"
+          npm pkg set --prefix "$work/original/package" name=aidea-zotero-mcp
+          npm pack "$work/original/package" --ignore-scripts --pack-destination "$PWD/release"
+          tar -xzf "release/aidea-zotero-mcp-$RELEASE_VERSION.tgz" -C "$work/short"
+          diff -r "$work/original/package" "$work/short/package"
+          node --input-type=commonjs - "$work" <<'NODE'
+          const assert = require('node:assert/strict');
+          const path = require('node:path');
+          const workspace = process.argv[2];
+          const original = require(path.join(workspace, 'package.json'));
+          const short = require(path.join(workspace, 'short/package/package.json'));
+          assert.equal(original.name, '@aidea-labs/aidea-zotero-mcp');
+          assert.equal(original.version, process.env.RELEASE_VERSION);
+          assert.deepEqual(short, { ...original, name: 'aidea-zotero-mcp' });
+          NODE
+          echo "version=$RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
 
       - name: Check the npm package
         env:
-          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
+          RELEASE_VERSION: ${{ steps.package.outputs.version }}
         run: |
           archive="release/aidea-labs-aidea-zotero-mcp-$RELEASE_VERSION.tgz"
           tar -tzf "$archive" > package-files.txt
@@ -130,8 +137,12 @@ jobs:
           if-no-files-found: error
 
   publish:
-    needs: [release-please, build]
-    if: needs.release-please.outputs.version != '0.1.0'
+    needs: build
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        archive: [aidea-labs-aidea-zotero-mcp, aidea-zotero-mcp]
     runs-on: ubuntu-latest
     environment: npm
     permissions:
@@ -152,11 +163,14 @@ jobs:
           path: release
 
       - name: Publish to npm
-        run: npm publish ./release/*.tgz --access public
+        env:
+          ARCHIVE: ${{ matrix.archive }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: npm publish "./release/$ARCHIVE-$RELEASE_VERSION.tgz" --access public
 
   bootstrap-stage:
-    needs: [release-please, build]
-    if: needs.release-please.outputs.version == '0.1.0'
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     environment: npm-bootstrap
     steps:
@@ -176,15 +190,15 @@ jobs:
       - name: Install the npm CLI with staged-publishing support
         run: npm install --global npm@11.15.0
 
-      - name: Stage the first version for approval on npmjs.com
+      - name: Stage the short-name package for approval on npmjs.com
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_BOOTSTRAP_TOKEN }}
         run: |
           test -n "$NODE_AUTH_TOKEN"
-          npm stage publish ./release/*.tgz --access public
+          npm stage publish ./release/aidea-zotero-mcp-0.1.0.tgz --access public
 
   bootstrap-confirm:
-    needs: [release-please, bootstrap-stage]
+    needs: [build, bootstrap-stage]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -202,7 +216,7 @@ jobs:
 
       - name: Wait for npm approval and verify the public package
         env:
-          RELEASE_VERSION: ${{ needs.release-please.outputs.version }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
         run: |
           node --input-type=module - <<'NODE'
           import { createHash } from 'node:crypto';
@@ -210,9 +224,9 @@ jobs:
           import { setTimeout } from 'node:timers/promises';
 
           const version = process.env.RELEASE_VERSION;
-          const archive = readFileSync('release/aidea-labs-aidea-zotero-mcp-' + version + '.tgz');
+          const archive = readFileSync('release/aidea-zotero-mcp-' + version + '.tgz');
           const expected = 'sha512-' + createHash('sha512').update(archive).digest('base64');
-          const url = 'https://registry.npmjs.org/@aidea-labs%2Faidea-zotero-mcp/' + version;
+          const url = 'https://registry.npmjs.org/aidea-zotero-mcp/' + version;
           console.log('Approve this version in npmjs.com → Staged Packages.');
 
           for (let attempt = 0; attempt < 50; attempt++) {
@@ -233,7 +247,7 @@ jobs:
           NODE
 
   upload-release-asset:
-    needs: [release-please, build, publish, bootstrap-confirm]
+    needs: [build, publish, bootstrap-confirm]
     if: >-
       !cancelled() && needs.build.result == 'success' &&
       (needs.publish.result == 'success' || needs.bootstrap-confirm.result == 'success')
@@ -250,5 +264,11 @@ jobs:
       - name: Attach the published package to the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.release-please.outputs.tag }}
-        run: gh release upload "$RELEASE_TAG" release/*.tgz --repo "$GITHUB_REPOSITORY" --clobber
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            gh release upload "$RELEASE_TAG" "release/aidea-zotero-mcp-$RELEASE_VERSION.tgz" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release upload "$RELEASE_TAG" release/*.tgz --repo "$GITHUB_REPOSITORY" --clobber
+          fi
